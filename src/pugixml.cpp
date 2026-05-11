@@ -35,6 +35,32 @@
 #	include <string>
 #endif
 
+// Check if charconv is available with float support
+#if !defined(PUGIXML_CHARCONV_FLOAT) && __cplusplus >= 201703L
+// include a C++ header so the C++ library defines are available
+#	if __cplusplus >= 202002L
+#		include <version>
+#	else
+#		include <ciso646>
+#	endif
+
+// MS STL uses a versioning scheme where 141+ corresponds to
+// the VS 2017 15.7+ toolset which added float charconv.
+// GCC 11 added Floating point support.
+// LLVM 20 finally added std::from_chars(float).
+#	if defined(_MSVC_STL_VERSION) && _MSVC_STL_VERSION >= 141 || \
+  	   defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 11 ||    \
+    	   defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200100
+#		define PUGIXML_CHARCONV_FLOAT
+
+#	endif
+#endif
+
+#ifdef PUGIXML_CHARCONV_FLOAT
+#       include <charconv>
+#	include <string>
+#endif
+
 // For placement new
 #include <new>
 
@@ -4624,7 +4650,11 @@ PUGI_IMPL_NS_BEGIN
 			// since overflow detection relies on length of the sequence skip leading zeros
 			while (*s == '0')
 				s++;
+	#if defined(PUGIXML_CHARCONV_FLOAT) && !defined(PUGIXML_WCHAR_MODE)
+			auto res = std::from_chars(s, s + std::char_traits<char_t>::length(s), result, 16);
+			overflow = res.ec == std::errc::result_out_of_range;
 
+	#else
 			const char_t* start = s;
 
 			for (;;)
@@ -4642,12 +4672,18 @@ PUGI_IMPL_NS_BEGIN
 			size_t digits = static_cast<size_t>(s - start);
 
 			overflow = digits > sizeof(U) * 2;
+	#endif
 		}
 		else
 		{
 			// since overflow detection relies on length of the sequence skip leading zeros
 			while (*s == '0')
 				s++;
+	#if defined(PUGIXML_CHARCONV_FLOAT) && !defined(PUGIXML_WCHAR_MODE)
+			auto res = std::from_chars(s, s + std::char_traits<char_t>::length(s), result, 10);
+			overflow = res.ec == std::errc::result_out_of_range;
+
+	#else
 
 			const char_t* start = s;
 
@@ -4670,6 +4706,7 @@ PUGI_IMPL_NS_BEGIN
 			const size_t high_bit = sizeof(U) * 8 - 1;
 
 			overflow = digits >= max_digits10 && !(digits == max_digits10 && (*start < max_lead || (*start == max_lead && result >> high_bit)));
+	#endif
 		}
 
 		if (negative)
@@ -4699,6 +4736,14 @@ PUGI_IMPL_NS_BEGIN
 	{
 	#ifdef PUGIXML_WCHAR_MODE
 		return wcstod(value, NULL);
+	#elif defined(PUGIXML_CHARCONV_FLOAT)
+		while (PUGI_IMPL_IS_CHARTYPE(*value, ct_space))
+			value++;
+		if (*value == '+')
+			value++;
+		double result{};
+		std::from_chars(value, value + std::char_traits<char_t>::length(value), result);
+		return result;
 	#else
 		return strtod(value, NULL);
 	#endif
@@ -4708,6 +4753,14 @@ PUGI_IMPL_NS_BEGIN
 	{
 	#ifdef PUGIXML_WCHAR_MODE
 		return static_cast<float>(wcstod(value, NULL));
+	#elif defined(PUGIXML_CHARCONV_FLOAT)
+		while (PUGI_IMPL_IS_CHARTYPE(*value, ct_space))
+			value++;
+		if (*value == '+')
+			value++;
+		float result{};
+		std::from_chars(value, value + std::char_traits<char_t>::length(value), result);
+		return result;
 	#else
 		return static_cast<float>(strtod(value, NULL));
 	#endif
@@ -4785,8 +4838,12 @@ PUGI_IMPL_NS_BEGIN
 	PUGI_IMPL_FN bool set_value_convert(String& dest, Header& header, uintptr_t header_mask, float value, int precision)
 	{
 		char buf[128];
+	#ifdef PUGIXML_CHARCONV_FLOAT
+		auto result = std::to_chars(std::begin(buf), std::end(buf), value, std::chars_format::general, precision);
+		*result.ptr = '\0';
+	#else
 		PUGI_IMPL_SNPRINTF(buf, "%.*g", precision, double(value));
-
+	#endif
 		return set_value_ascii(dest, header, header_mask, buf);
 	}
 
@@ -4794,7 +4851,12 @@ PUGI_IMPL_NS_BEGIN
 	PUGI_IMPL_FN bool set_value_convert(String& dest, Header& header, uintptr_t header_mask, double value, int precision)
 	{
 		char buf[128];
+	#ifdef PUGIXML_CHARCONV_FLOAT
+		auto result = std::to_chars(std::begin(buf), std::end(buf), value, std::chars_format::general, precision);
+		*result.ptr = '\0';
+	#else
 		PUGI_IMPL_SNPRINTF(buf, "%.*g", precision, value);
+	#endif
 
 		return set_value_ascii(dest, header, header_mask, buf);
 	}
@@ -8858,14 +8920,29 @@ PUGI_IMPL_NS_BEGIN
 #else
 	PUGI_IMPL_FN void convert_number_to_mantissa_exponent(double value, char (&buffer)[32], char** out_mantissa, int* out_exponent)
 	{
+	#ifdef PUGIXML_CHARCONV_FLOAT
+		auto res = std::to_chars(std::begin(buffer), std::end(buffer), value, std::chars_format::scientific, DBL_DIG);
+		*res.ptr = '\0';
+	#else
 		// get a scientific notation value with IEEE DBL_DIG decimals
 		PUGI_IMPL_SNPRINTF(buffer, "%.*e", DBL_DIG, value);
-
+	#endif
 		// get the exponent (possibly negative)
 		char* exponent_string = strchr(buffer, 'e');
 		assert(exponent_string);
 
+	#ifdef PUGIXML_CHARCONV_FLOAT
+		const char *s = exponent_string + 1;
+		bool isneg = *s == '-';
+		while (*s++ == '0')
+			;
+		int exponent;
+		std::from_chars(s, res.ptr, exponent, 10);
+		if (isneg)
+			exponent = -exponent;
+	#else
 		int exponent = atoi(exponent_string + 1);
+	#endif
 
 		// extract mantissa string: skip sign
 		char* mantissa = buffer[0] == '-' ? buffer + 1 : buffer;
@@ -8954,9 +9031,6 @@ PUGI_IMPL_NS_BEGIN
 
 	PUGI_IMPL_FN bool check_string_to_number_format(const char_t* string)
 	{
-		// parse leading whitespace
-		while (PUGI_IMPL_IS_CHARTYPE(*string, ct_space)) ++string;
-
 		// parse sign
 		if (*string == '-') ++string;
 
@@ -8984,12 +9058,19 @@ PUGI_IMPL_NS_BEGIN
 
 	PUGI_IMPL_FN double convert_string_to_number(const char_t* string)
 	{
+		// parse leading whitespace
+		while (PUGI_IMPL_IS_CHARTYPE(*string, ct_space)) ++string;
+
 		// check string format
 		if (!check_string_to_number_format(string)) return gen_nan();
 
 		// parse string
 	#ifdef PUGIXML_WCHAR_MODE
 		return wcstod(string, NULL);
+        #elif defined(PUGIXML_CHARCONV_FLOAT)
+		double result{};
+		std::from_chars(string, string + std::char_traits<char_t>::length(string), result);
+		return result;
 	#else
 		return strtod(string, NULL);
 	#endif
