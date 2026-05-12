@@ -8902,7 +8902,6 @@ PUGI_IMPL_NS_BEGIN
 		*end = 0;
 	}
 
-#if !(defined(PUGIXML_CHARCONV_FLOAT) && !defined(PUGIXML_WCHAR_MODE))
 	// gets mantissa digits in the form of 0.xxxxx with 0. implied and the exponent
 #if defined(PUGI_IMPL_MSVC_CRT_VERSION) && PUGI_IMPL_MSVC_CRT_VERSION >= 1400
 	PUGI_IMPL_FN void convert_number_to_mantissa_exponent(double value, char (&buffer)[32], char** out_mantissa, int* out_exponent)
@@ -8962,27 +8961,12 @@ PUGI_IMPL_NS_BEGIN
 		*out_exponent = exponent;
 	}
 #endif
-#endif
 
 	PUGI_IMPL_FN xpath_string convert_number_to_string(double value, xpath_allocator* alloc)
 	{
 		// try special number conversion
 		const char_t* special = convert_number_to_string_special(value);
 		if (special) return xpath_string::from_const(special);
-
-	#if defined(PUGIXML_CHARCONV_FLOAT) && !defined(PUGIXML_WCHAR_MODE)
-		char buffer[32];
-		auto res = std::to_chars(std::begin(buffer), std::end(buffer), value, std::chars_format::general);
-		*res.ptr = '\0';
-
-		size_t str_len = res.ptr - std::begin(buffer);
-		char_t* result = static_cast<char_t*>(alloc->allocate(sizeof(char_t) * (str_len + 1)));
-		if (!result) return xpath_string();
-
-		memcpy(result, std::begin(buffer), sizeof(char_t) * (str_len + 1));
-		return xpath_string::from_heap_preallocated(result, result + str_len);
-
-	#else
 
 		// get mantissa + exponent form
 		char mantissa_buffer[32];
@@ -9043,7 +9027,6 @@ PUGI_IMPL_NS_BEGIN
 		*s = 0;
 
 		return xpath_string::from_heap_preallocated(result, s);
-	#endif
 	}
 
 	PUGI_IMPL_FN bool check_string_to_number_format(const char_t* string)
