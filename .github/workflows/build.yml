@@ -12,7 +12,7 @@ jobs:
       matrix:
         os: [ubuntu, macos]
         compiler: [g++, clang++]
-        defines: [standard, PUGIXML_WCHAR_MODE, PUGIXML_COMPACT, PUGIXML_NO_EXCEPTIONS]
+        defines: [standard, PUGIXML_WCHAR_MODE, PUGIXML_COMPACT, PUGIXML_NO_EXCEPTIONS, PUGIXML_CHARCONV_CONVERSION]
         exclude:
           - os: macos
             compiler: g++
@@ -55,7 +55,7 @@ jobs:
     strategy:
       matrix:
         arch: [Win32, x64]
-        defines: [standard, PUGIXML_WCHAR_MODE, PUGIXML_COMPACT, PUGIXML_NO_EXCEPTIONS]
+        defines: [standard, PUGIXML_WCHAR_MODE, PUGIXML_COMPACT, PUGIXML_NO_EXCEPTIONS, PUGIXML_CHARCONV_CONVERSION]
     steps:
     - uses: actions/checkout@v4
     - name: cmake configure
