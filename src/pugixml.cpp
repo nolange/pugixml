@@ -37,6 +37,11 @@
 
 #ifdef PUGIXML_CHARCONV_FLOAT
 #	include <charconv>
+#	ifdef __GLIBCXX__
+	// a fixed, conforming implementation should be identifiable by a higher __cpp_lib_to_chars version
+	// https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p4168r0.html
+#	define PUGIXML_CHARCONV_FLOAT_FIXUP
+#	endif
 #endif
 
 // For placement new
@@ -791,6 +796,30 @@ PUGI_IMPL_NS_BEGIN
 		return reinterpret_cast<char*>(page) + sizeof(xml_memory_page);
 	}
 PUGI_IMPL_NS_END
+
+#ifdef PUGIXML_CHARCONV_FLOAT_FIXUP
+PUGI_IMPL_NS_BEGIN
+	PUGI_IMPL_FN bool str_is_underflow(const char *begin, const char *end) {
+		bool is_only_zero = true;
+		for (; begin != end; ++begin) {
+			switch (*begin) {
+			case 'e':
+			case 'E':
+				// Scientific notation, test if exponent is negative
+				return begin[1] == '-';
+			case '.':
+				// test if string before is all zero (or empty)
+				return is_only_zero;
+			case '0':
+				continue;
+			default:
+				is_only_zero = false;
+			}
+		}
+		return false;
+	}
+PUGI_IMPL_NS_END
+#endif
 
 #ifdef PUGIXML_COMPACT
 PUGI_IMPL_NS_BEGIN
@@ -4711,7 +4740,17 @@ PUGI_IMPL_NS_BEGIN
 			value++;
 		// return code is intentionally ignored to let libc++/MSVC STL correctly handle underflow/overflow
 		double result = 0.0;
-		std::from_chars(value, value + strlen(value), result);
+		std::from_chars_result res = std::from_chars(value, value + strlen(value), result);
+#ifdef PUGIXML_CHARCONV_FLOAT_FIXUP
+		if (res.ec == std::errc::result_out_of_range) {
+			bool is_neg = *value == '-';
+			bool is_small = str_is_underflow(value + (is_neg ? 1 : 0), res.ptr);
+
+			return is_small ? (is_neg ? -0.0 : 0.0) : (is_neg ? -HUGE_VAL : HUGE_VAL);
+		}
+#else
+		(void)res;
+#endif
 		return result;
 	#else
 		return strtod(value, NULL);
@@ -4729,7 +4768,17 @@ PUGI_IMPL_NS_BEGIN
 			value++;
 		// return code is intentionally ignored to let libc++/MSVC STL correctly handle underflow/overflow
 		float result = 0.0f;
-		std::from_chars(value, value + strlen(value), result);
+		std::from_chars_result res = std::from_chars(value, value + strlen(value), result);
+#ifdef PUGIXML_CHARCONV_FLOAT_FIXUP
+		if (res.ec == std::errc::result_out_of_range) {
+			bool is_neg = *value == '-';
+			bool is_small = str_is_underflow(value + (is_neg ? 1 : 0), res.ptr);
+
+			return is_small ? (is_neg ? -0.0f : 0.0f) : (is_neg ? -HUGE_VALF : HUGE_VALF);
+		}
+#else
+		(void)res;
+#endif
 		return result;
 	#else
 		return static_cast<float>(strtod(value, NULL));
